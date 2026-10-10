@@ -720,10 +720,18 @@
             dualBtn.classList.toggle('active', dual);
         }
 
+        /** In dual mode: page 1 alone; then spreads with even on left, odd on right. */
+        function normalizeSpread(page) {
+            page = Math.max(1, Math.min(totalPages, page | 0));
+            if (!dual) return page;
+            if (page <= 1) return 1;
+            // Left page of spread must be even (2,4,6…)
+            return page % 2 === 0 ? page : page - 1;
+        }
+
         function updatePage() {
             updateMode();
-            if (currentPage < 1) currentPage = 1;
-            if (currentPage > totalPages) currentPage = totalPages;
+            currentPage = normalizeSpread(currentPage);
 
             // Fade transition
             const f1 = document.getElementById('page1Frame');
@@ -732,8 +740,10 @@
             f2.classList.add('fading');
 
             setTimeout(() => {
+                // Page 1 alone in dual mode; otherwise even (left) + odd (right)
+                const showSpread = dual && currentPage >= 2 && currentPage < totalPages;
                 page1Image.src = fname(currentPage);
-                if (dual && currentPage < totalPages) {
+                if (showSpread) {
                     page2Image.src = fname(currentPage + 1);
                     page2Frame.style.display = '';
                     pageLabel.textContent = `${label(currentPage)} – ${label(currentPage + 1)}`;
@@ -745,26 +755,36 @@
                 f2.classList.remove('fading');
             }, 120);
 
-            const adj = adjustedPage(currentPage);
-            pageInput.value = adj !== null ? adj : '';
+            // Μετάβαση: show right-hand (odd) page when in a spread, else current
+            const displayIdx = (dual && currentPage >= 2 && currentPage < totalPages)
+                ? currentPage + 1 : currentPage;
+            const adj = adjustedPage(displayIdx);
+            pageInput.value = adj !== null ? adj : (adjustedPage(currentPage) ?? '');
 
             const atStart = currentPage <= 1;
-            const atEnd = dual ? (currentPage + 1 >= totalPages) : (currentPage >= totalPages);
+            const atEnd = dual
+                ? (currentPage >= totalPages || (currentPage + 1 >= totalPages && currentPage >= 2))
+                : (currentPage >= totalPages);
+            // More precise end: last spread starts at normalizeSpread(totalPages)
+            const lastLeft = totalPages <= 1 ? 1 : (totalPages % 2 === 0 ? totalPages : totalPages - 1);
+            const reallyAtEnd = dual ? (currentPage >= lastLeft) : (currentPage >= totalPages);
+
             prevBtn.disabled = atStart;
             firstBtn.disabled = atStart;
-            nextBtn.disabled = atEnd;
-            lastBtn.disabled = atEnd;
+            nextBtn.disabled = reallyAtEnd;
+            lastBtn.disabled = reallyAtEnd;
 
             // Progress
             progressFill.style.width = ((currentPage - 1) / (totalPages - 1) * 100) + '%';
 
             // Highlight TOC
             document.querySelectorAll('.toc-item').forEach(el => {
-                el.classList.toggle('active', parseInt(el.dataset.page) === currentPage);
+                const p = parseInt(el.dataset.page);
+                el.classList.toggle('active', p === currentPage || (dual && p === currentPage + 1));
             });
 
             // Preload
-            [currentPage - step, currentPage + step, currentPage + 1 + step].forEach(n => {
+            [currentPage - 2, currentPage + 2, currentPage + 1, currentPage + 3].forEach(n => {
                 if (n >= 1 && n <= totalPages) { const i = new Image(); i.src = fname(n); }
             });
 
@@ -772,15 +792,29 @@
         }
 
         function changePage(delta) {
-            let next = currentPage + delta;
-            if (next < 1) next = 1;
-            if (next > totalPages) next = totalPages;
-            currentPage = next;
+            if (dual) {
+                if (delta > 0) {
+                    // Forward: 1 → 2, 2 → 4, 4 → 6 …
+                    if (currentPage <= 1) currentPage = 2;
+                    else currentPage = Math.min(normalizeSpread(totalPages), currentPage + 2);
+                } else {
+                    // Back: 2 → 1, 4 → 2 …
+                    if (currentPage <= 2) currentPage = 1;
+                    else currentPage = currentPage - 2;
+                }
+            } else {
+                let next = currentPage + delta;
+                if (next < 1) next = 1;
+                if (next > totalPages) next = totalPages;
+                currentPage = next;
+            }
             updatePage();
         }
 
         function goToPage(page) {
-            currentPage = Math.max(1, Math.min(totalPages, page | 0));
+            page = Math.max(1, Math.min(totalPages, page | 0));
+            // Snap into correct spread so requested page is visible (odd → right side)
+            currentPage = normalizeSpread(page);
             updatePage();
             closePanels();
         }
